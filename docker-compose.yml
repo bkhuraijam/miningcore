@@ -1,0 +1,29 @@
+version: "3.8"
+
+services:
+  miningcore:
+    image: miningcore
+    container_name: miningcore
+    restart: always
+    network_mode: host
+    logging:
+      options:
+        max-size: "10m"
+    volumes:
+      - /data/.miningcore/config.json:/app/config.json
+      - /data/.miningcore/coins.json:/app/build/coins.json
+
+  miningcore-webui:
+    image: theretromike/miningcorewebui
+    container_name: miningcore-webui
+    restart: always
+    ports:
+      - "80:8080"
+    logging:
+      options:
+        max-size: "10m"
+    environment:
+      # Adjust these to match your host IP and pool name
+      API_BASE_URL: "http://192.168.0.90:4000/api"
+      STRATUM_HOST: "192.168.0.90"
+      POOL_NAME: "Beni's Mining Pool"

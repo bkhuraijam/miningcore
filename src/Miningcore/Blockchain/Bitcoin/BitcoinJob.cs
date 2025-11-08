@@ -37,6 +37,9 @@ public class BitcoinJob
     private BitcoinTemplate.BitcoinNetworkParams networkParams;
     protected readonly ConcurrentDictionary<string, bool> submissions = new(StringComparer.OrdinalIgnoreCase);
     protected uint256 blockTargetValue;
+    // Optional Real Time Target (Heartbeat) for eCash
+    protected bool hasRttTarget;
+    protected uint256 rttTargetValue;
     protected byte[] coinbaseFinal;
     protected string coinbaseFinalHex;
     protected byte[] coinbaseInitial;
@@ -45,7 +48,7 @@ public class BitcoinJob
     protected MerkleTree mt;
     protected string[] merkleSegwitBranchesHex;
     protected MerkleTree mtSegwit;
-	
+
     ///////////////////////////////////////////
     // GetJobParams related properties
 
@@ -272,7 +275,7 @@ public class BitcoinJob
                     raw = scriptPubKey;
                     rawLength = (uint)raw.Length;
                 }
-				
+
                 bs.ReadWrite(ref amount);
                 bs.ReadWriteAsVarInt(ref rawLength);
                 bs.ReadWrite(raw);
@@ -344,7 +347,7 @@ public class BitcoinJob
         if(coin.HasCoinbaseDevReward)
             rewardToPool = CreateCoinbaseDevRewardOutputs(tx, rewardToPool);
 
-        if(coin.HasCoinbaseStakingReward)
+        if (coin.HasCoinbaseStakingReward)
             rewardToPool = CreateCoinbaseStakingRewardOutputs(tx, rewardToPool);
 
         if(coin.HasCommunity)
@@ -356,7 +359,7 @@ public class BitcoinJob
         if(coin.HasDeveloper)
             rewardToPool = CreateDeveloperOutputs(tx, rewardToPool);
 
-        if(coin.HasFoundation)
+        if (coin.HasFoundation)
             rewardToPool = CreateFoundationOutputs(tx, rewardToPool);
 
         // Remaining amount goes to pool
@@ -435,13 +438,22 @@ public class BitcoinJob
         var headerValue = new uint256(headerHash);
 
         // calc share-diff
-        var diff1 = coin.Diff1 != null ? BigInteger.Parse(coin.Diff1, NumberStyles.HexNumber) : BitcoinConstants.Diff1; 
-		var shareDiff = (double) new BigRational(diff1, headerHash.ToBigInteger()) * shareMultiplier;
+        var diff1 = coin.Diff1 != null ? BigInteger.Parse(coin.Diff1, NumberStyles.HexNumber) : BitcoinConstants.Diff1;
+                var shareDiff = (double) new BigRational(diff1, headerHash.ToBigInteger()) * shareMultiplier;
         var stratumDifficulty = context.Difficulty;
         var ratio = shareDiff / stratumDifficulty;
 
+        // compute effective target (normal bits target, optionally clamped by RTT)
+        var effectiveTargetValue = blockTargetValue;
+        if(hasRttTarget)
+        {
+            // RTT is a stricter target; choose the harder one (lower target value)
+            if(rttTargetValue < effectiveTargetValue)
+                effectiveTargetValue = rttTargetValue;
+        }
+
         // check if the share meets the much harder block difficulty (block candidate)
-        var isBlockCandidate = headerValue <= blockTargetValue;
+        var isBlockCandidate = headerValue <= effectiveTargetValue;
 
         // test if share meets at least workers current difficulty
         if(!isBlockCandidate && ratio < 0.99)
@@ -574,7 +586,7 @@ public class BitcoinJob
                 foreach(var masterNode in masternodes)
                 {
                     if(masterNode.Amount > 0)
-                    {                      
+                    {
                         var payeeReward = masterNode.Amount;
 
                         //DASH blocks require a OP_RETURN Burn with no payee address
@@ -589,7 +601,7 @@ public class BitcoinJob
                             var payeeDestination = BitcoinUtils.AddressToDestination(masterNode.Payee, network);
                             tx.Outputs.Add(payeeReward, payeeDestination);
                         }
-                        
+
                         reward -= payeeReward;
                     }
                 }
@@ -1017,6 +1029,15 @@ public class BitcoinJob
         {
             var tmp = new Target(BlockTemplate.Bits.HexToByteArray());
             blockTargetValue = tmp.ToUInt256();
+        }
+
+        // Optional RTT target (eCash heartbeat). Safe for other coins: only set if present.
+        hasRttTarget = false;
+        if(BlockTemplate.Rtt?.NextTarget != null)
+        {
+            var rttTmp = new Target(BlockTemplate.Rtt.NextTarget.HexToByteArray());
+            rttTargetValue = rttTmp.ToUInt256();
+            hasRttTarget = true;
         }
 
         previousBlockHashReversedHex = BlockTemplate.PreviousBlockhash

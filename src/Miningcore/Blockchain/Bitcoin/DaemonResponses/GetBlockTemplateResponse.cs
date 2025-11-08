@@ -30,6 +30,25 @@ public class CoinbaseAux
     public string Flags { get; set; }
 }
 
+/// <summary>
+/// Real Time Targeting (Heartbeat) info for eCash.
+/// Optional: only present in eCash GBT responses.
+/// </summary>
+public class RttInfo
+{
+    [JsonProperty("nexttarget")]
+    public string NextTarget { get; set; }
+
+    [JsonProperty("prevbits")]
+    public string PrevBits { get; set; }
+
+    [JsonProperty("nodetime")]
+    public long NodeTime { get; set; }
+
+    [JsonProperty("prevheadertime")]
+    public long[] PrevHeaderTime { get; set; }
+}
+
 public class BlockTemplate
 {
     /// <summary>
@@ -96,6 +115,13 @@ public class BlockTemplate
 
     [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
     public long CommunityAutonomousValue { get; set; }
+
+    /// <summary>
+    /// Optional RTT info (eCash only).
+    /// Will be null for BTC, BCH, DGB, etc.
+    /// </summary>
+    [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+    public RttInfo Rtt { get; set; }
 
     [JsonExtensionData]
     public IDictionary<string, object> Extra { get; set; }

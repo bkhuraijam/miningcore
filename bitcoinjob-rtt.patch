@@ -1,0 +1,108 @@
+diff --git a/src/Miningcore/Blockchain/Bitcoin/BitcoinJob.cs b/src/Miningcore/Blockchain/Bitcoin/BitcoinJob.cs
+index 9432b4e6..db9344b2 100644
+--- a/src/Miningcore/Blockchain/Bitcoin/BitcoinJob.cs
++++ b/src/Miningcore/Blockchain/Bitcoin/BitcoinJob.cs
+@@ -37,6 +37,8 @@ public class BitcoinJob
+     private BitcoinTemplate.BitcoinNetworkParams networkParams;
+     protected readonly ConcurrentDictionary<string, bool> submissions = new(StringComparer.OrdinalIgnoreCase);
+     protected uint256 blockTargetValue;
++    // Optional Real Time Target (Heartbeat) for eCash
++    protected uint256? rttTargetValue;
+     protected byte[] coinbaseFinal;
+     protected string coinbaseFinalHex;
+     protected byte[] coinbaseInitial;
+@@ -45,7 +47,7 @@ public class BitcoinJob
+     protected MerkleTree mt;
+     protected string[] merkleSegwitBranchesHex;
+     protected MerkleTree mtSegwit;
+-	
++
+     ///////////////////////////////////////////
+     // GetJobParams related properties
+ 
+@@ -272,7 +274,7 @@ public class BitcoinJob
+                     raw = scriptPubKey;
+                     rawLength = (uint)raw.Length;
+                 }
+-				
++
+                 bs.ReadWrite(ref amount);
+                 bs.ReadWriteAsVarInt(ref rawLength);
+                 bs.ReadWrite(raw);
+@@ -344,7 +346,7 @@ public class BitcoinJob
+         if(coin.HasCoinbaseDevReward)
+             rewardToPool = CreateCoinbaseDevRewardOutputs(tx, rewardToPool);
+ 
+-        if(coin.HasCoinbaseStakingReward)
++        if (coin.HasCoinbaseStakingReward)
+             rewardToPool = CreateCoinbaseStakingRewardOutputs(tx, rewardToPool);
+ 
+         if(coin.HasCommunity)
+@@ -356,7 +358,7 @@ public class BitcoinJob
+         if(coin.HasDeveloper)
+             rewardToPool = CreateDeveloperOutputs(tx, rewardToPool);
+ 
+-        if(coin.HasFoundation)
++        if (coin.HasFoundation)
+             rewardToPool = CreateFoundationOutputs(tx, rewardToPool);
+ 
+         // Remaining amount goes to pool
+@@ -435,13 +437,22 @@ public class BitcoinJob
+         var headerValue = new uint256(headerHash);
+ 
+         // calc share-diff
+-        var diff1 = coin.Diff1 != null ? BigInteger.Parse(coin.Diff1, NumberStyles.HexNumber) : BitcoinConstants.Diff1; 
+-		var shareDiff = (double) new BigRational(diff1, headerHash.ToBigInteger()) * shareMultiplier;
++        var diff1 = coin.Diff1 != null ? BigInteger.Parse(coin.Diff1, NumberStyles.HexNumber) : BitcoinConstants.Diff1;
++                var shareDiff = (double) new BigRational(diff1, headerHash.ToBigInteger()) * shareMultiplier;
+         var stratumDifficulty = context.Difficulty;
+         var ratio = shareDiff / stratumDifficulty;
+ 
++        // compute effective target (normal bits target, optionally clamped by RTT)
++        var effectiveTargetValue = blockTargetValue;
++        if(rttTargetValue.HasValue)
++        {
++            // RTT is a stricter target; choose the harder one (lower target value)
++            if(rttTargetValue.Value < effectiveTargetValue)
++                effectiveTargetValue = rttTargetValue.Value;
++        }
++
+         // check if the share meets the much harder block difficulty (block candidate)
+-        var isBlockCandidate = headerValue <= blockTargetValue;
++        var isBlockCandidate = headerValue <= effectiveTargetValue;
+ 
+         // test if share meets at least workers current difficulty
+         if(!isBlockCandidate && ratio < 0.99)
+@@ -574,7 +585,7 @@ public class BitcoinJob
+                 foreach(var masterNode in masternodes)
+                 {
+                     if(masterNode.Amount > 0)
+-                    {                      
++                    {
+                         var payeeReward = masterNode.Amount;
+ 
+                         //DASH blocks require a OP_RETURN Burn with no payee address
+@@ -589,7 +600,7 @@ public class BitcoinJob
+                             var payeeDestination = BitcoinUtils.AddressToDestination(masterNode.Payee, network);
+                             tx.Outputs.Add(payeeReward, payeeDestination);
+                         }
+-                        
++
+                         reward -= payeeReward;
+                     }
+                 }
+@@ -1019,6 +1030,14 @@ public class BitcoinJob
+             blockTargetValue = tmp.ToUInt256();
+         }
+ 
++        // Optional RTT target (eCash heartbeat). Safe for other coins: only set if present.
++        rttTargetValue = null;
++        if(BlockTemplate.Rtt?.NextTarget != null)
++        {
++            var rttTmp = new Target(BlockTemplate.Rtt.NextTarget.HexToByteArray());
++            rttTargetValue = rttTmp.ToUInt256();
++        }
++
+         previousBlockHashReversedHex = BlockTemplate.PreviousBlockhash
+             .HexToByteArray()
+             .ReverseByteOrder()
